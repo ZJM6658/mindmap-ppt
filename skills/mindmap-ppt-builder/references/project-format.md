@@ -76,14 +76,13 @@ Use `object-fit: contain`; avoid crop-dependent compositions.
 
 Match the existing presentation style:
 
-- background: warm off-white, light grid/dot texture
-- selected node: dark teal `#183a4a`
-- accent: orange `#d8894f`
-- completed node fill: pale green `#eef7f3`
-- path node fill: near-white `#fffdf8`
-- restrained shadows
+- background: deep gray workspace `#1e1e1e` with low-contrast dots `#363636`
+- nodes: off-white paper `#fcfcfa` with dark ink `#171717`
+- selected node: cobalt outline `#6f92ff`, without fill or scale emphasis
+- controls: one compact solid toolbar `#262626`
+- restrained borders and shadows
 - small `8px` radii
-- no heavy decorative effects, gradient blobs, dense textures, photorealism, or text inside generated images
+- no glass panels, gradient blobs, floating color orbits, letter-grid icons, dense textures, or ornamental AI-dashboard decoration
 
 ## Camera And Layout Constraints
 
@@ -92,4 +91,6 @@ Match the existing presentation style:
 - Unvisited nodes are hidden.
 - Node sizes are real HTML/CSS sizes; do not rely on SVG text measurement.
 - Links are SVG curves from node border to node border.
-- Camera uses actual viewport size and only auto-scales when user changes the zoom slider.
+- Camera uses the actual viewport and persists across presentation steps.
+- Empty-canvas drag, wheel/trackpad, Ctrl/Command + wheel, pinch, the zoom slider, and fit view are all supported.
+- Author the tree for speaking logic, not viewport packing. Do not split a coherent unit merely to make it fit on screen.

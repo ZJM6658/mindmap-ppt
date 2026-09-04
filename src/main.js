@@ -1,5 +1,20 @@
 import { sourceMarkdown } from "../project/source.js";
-import { handleImageButtonKeydown } from "./interaction.js";
+import {
+  clampCamera,
+  computeBounds,
+  computeFitCamera,
+  computeMinZoom,
+  computePinchCamera,
+  ensureRectVisible,
+  panCamera,
+  reconcileCamera,
+  zoomCameraAt,
+} from "./camera-model.js";
+import {
+  getStepDeltaForKey,
+  handleImageButtonKeydown,
+  isCanvasInteractionTarget,
+} from "./interaction.js";
 import {
   assignTreeMetadata,
   buildPresentationSteps,
@@ -21,8 +36,9 @@ const controlsToggle = document.querySelector("#controlsToggle");
 const nodeSlider = document.querySelector("#nodeSlider");
 const zoomSlider = document.querySelector("#zoomSlider");
 const zoomValue = document.querySelector("#zoomValue");
-const activeScaleSlider = document.querySelector("#activeScaleSlider");
-const activeScaleValue = document.querySelector("#activeScaleValue");
+const fitViewButton = document.querySelector("#fitViewButton");
+const previousStepButton = document.querySelector("#previousStepButton");
+const nextStepButton = document.querySelector("#nextStepButton");
 const nextNodePreview = document.querySelector("#nextNodePreview");
 const nextNodeSubtitle = document.querySelector("#nextNodeSubtitle");
 const nextNodeTitle = document.querySelector("#nextNodeTitle");
@@ -37,17 +53,10 @@ const layout = {
   stagePaddingX: 114,
   stagePaddingY: 72,
   centerBaseline: 520,
-  cameraTargetCenterBand: 0.4,
 };
-const wheelNavigation = {
-  threshold: 72,
-  idleResetMs: 180,
-};
-const swipeNavigation = {
-  intentDistance: 10,
-  minDistance: 56,
-  dominanceRatio: 1.25,
-};
+const VIEW_PADDING = 48;
+const MIN_VISIBLE_CONTENT = 72;
+const MAX_ZOOM = 2;
 
 let activeStepIndex = 0;
 let root = parseMarkdownTree(sourceMarkdown);
@@ -56,13 +65,13 @@ let presentationSteps = [];
 let idToNode = new Map();
 let renderedNodes = new Map();
 let renderedLinks = new Map();
-let cameraTargetIndex = null;
 let currentNodeMetrics = new Map();
-let cameraZoom = Number(zoomSlider.value) / 100;
-let activeScale = Number(activeScaleSlider.value) / 100;
-let wheelDeltaBuffer = 0;
-let wheelNavigationTimer = null;
-let swipeStart = null;
+let currentModel = null;
+let currentBounds = null;
+let camera = null;
+let fitZoom = 1;
+let pointerGesture = null;
+const activePointers = new Map();
 
 assignTreeMetadata(root);
 preorder = collectPreorder(root);
@@ -78,26 +87,24 @@ controlsToggle.addEventListener("click", () => {
   controlsToggle.setAttribute("aria-expanded", String(!isCollapsed));
   controlsToggle.setAttribute("aria-label", isCollapsed ? "展开控制面板" : "收起控制面板");
   controlsToggle.title = isCollapsed ? "展开控制面板" : "收起控制面板";
-  controlsToggle.querySelector("span").textContent = isCollapsed ? "+" : "−";
+  controlsToggle.querySelector("span").textContent = isCollapsed ? "+" : "×";
 });
 nodeSlider.addEventListener("input", (event) => {
   setActiveStepIndex(Number(event.target.value));
 });
 zoomSlider.addEventListener("input", (event) => {
-  cameraZoom = Number(event.target.value) / 100;
-  render();
+  setCameraZoom(Number(event.target.value) / 100, viewportCenter());
 });
-activeScaleSlider.addEventListener("input", (event) => {
-  activeScale = Number(event.target.value) / 100;
-  render();
-});
+fitViewButton.addEventListener("click", fitView);
+previousStepButton.addEventListener("click", () => setActiveStepIndex(activeStepIndex - 1));
+nextStepButton.addEventListener("click", () => setActiveStepIndex(activeStepIndex + 1));
 window.addEventListener("keydown", handleKeydown);
-window.addEventListener("wheel", handleWheel, { passive: false });
-window.addEventListener("resize", () => render());
-mindmap.addEventListener("touchstart", handleTouchStart, { passive: true });
-mindmap.addEventListener("touchmove", handleTouchMove, { passive: false });
-mindmap.addEventListener("touchend", handleTouchEnd, { passive: false });
-mindmap.addEventListener("touchcancel", resetSwipeStart);
+mindmap.addEventListener("wheel", handleWheel, { passive: false });
+mindmap.addEventListener("pointerdown", handlePointerDown);
+mindmap.addEventListener("pointermove", handlePointerMove);
+mindmap.addEventListener("pointerup", handlePointerEnd);
+mindmap.addEventListener("pointercancel", handlePointerEnd);
+window.addEventListener("resize", handleResize);
 
 render();
 
@@ -111,13 +118,7 @@ function handleKeydown(event) {
     return;
   }
 
-  const stepByKey = {
-    ArrowDown: 1,
-    PageDown: 1,
-    ArrowUp: -1,
-    PageUp: -1,
-  };
-  const step = stepByKey[event.key];
+  const step = getStepDeltaForKey(event);
   if (step) {
     event.preventDefault();
     setActiveStepIndex(activeStepIndex + step);
@@ -125,107 +126,90 @@ function handleKeydown(event) {
 }
 
 function handleWheel(event) {
-  if (imageViewer.isOpen() || event.ctrlKey || event.metaKey) {
-    return;
-  }
-
-  const deltaY = normalizeWheelDeltaY(event);
-  if (Math.abs(deltaY) < 1) {
-    return;
-  }
-
+  if (imageViewer.isOpen() || !camera) return;
   event.preventDefault();
+  const deltaX = normalizeWheelDelta(event.deltaX, event.deltaMode, getViewportSize().width);
+  const deltaY = normalizeWheelDelta(event.deltaY, event.deltaMode, getViewportSize().height);
 
-  if (wheelDeltaBuffer !== 0 && Math.sign(wheelDeltaBuffer) !== Math.sign(deltaY)) {
-    wheelDeltaBuffer = 0;
-  }
-  wheelDeltaBuffer += deltaY;
-  const step = Math.trunc(wheelDeltaBuffer / wheelNavigation.threshold);
-  if (step === 0) {
-    scheduleWheelBufferReset();
+  if (event.ctrlKey || event.metaKey) {
+    const anchor = pointerInCanvas(event.clientX, event.clientY);
+    const factor = Math.exp(-deltaY * 0.002);
+    setCameraZoom(camera.zoom * factor, anchor, true);
     return;
   }
 
-  setActiveStepIndex(activeStepIndex + step);
-  wheelDeltaBuffer -= step * wheelNavigation.threshold;
-  scheduleWheelBufferReset();
+  const horizontalDelta = event.shiftKey && deltaX === 0 ? deltaY : deltaX;
+  const verticalDelta = event.shiftKey && deltaX === 0 ? 0 : deltaY;
+  camera = panCamera(camera, { x: -horizontalDelta, y: -verticalDelta });
+  camera = clampCurrentCamera(camera);
+  applyCameraTransform(true);
 }
 
-function scheduleWheelBufferReset() {
-  window.clearTimeout(wheelNavigationTimer);
-  wheelNavigationTimer = window.setTimeout(() => {
-    wheelDeltaBuffer = 0;
-  }, wheelNavigation.idleResetMs);
+function normalizeWheelDelta(delta, deltaMode, pageSize) {
+  if (deltaMode === 1) return delta * 16;
+  if (deltaMode === 2) return delta * pageSize;
+  return delta;
 }
 
-function normalizeWheelDeltaY(event) {
-  if (event.deltaMode === 1) {
-    return event.deltaY * 16;
+function handlePointerDown(event) {
+  if (imageViewer.isOpen() || event.button !== 0 || !isCanvasInteractionTarget(event.target)) return;
+
+  mindmap.setPointerCapture(event.pointerId);
+  activePointers.set(event.pointerId, pointerInCanvas(event.clientX, event.clientY));
+  pointerGesture = createPointerGesture();
+  mindmap.classList.add("is-panning");
+}
+
+function handlePointerMove(event) {
+  if (!activePointers.has(event.pointerId) || !camera) return;
+
+  const previous = activePointers.get(event.pointerId);
+  const current = pointerInCanvas(event.clientX, event.clientY);
+  activePointers.set(event.pointerId, current);
+
+  if (activePointers.size >= 2 && pointerGesture?.type === "pinch") {
+    const next = computePinchCamera(
+      pointerGesture.camera,
+      pointerGesture.touches,
+      [...activePointers.values()].slice(0, 2),
+    );
+    const zoom = clamp(next.zoom, computeMinZoom(fitZoom), MAX_ZOOM);
+    camera = zoom === next.zoom ? next : zoomCameraAt(next, zoom, midpoint([...activePointers.values()].slice(0, 2)));
+  } else if (activePointers.size === 1 && previous) {
+    camera = panCamera(camera, { x: current.x - previous.x, y: current.y - previous.y });
   }
 
-  if (event.deltaMode === 2) {
-    return event.deltaY * getViewportSize().height;
-  }
-
-  return event.deltaY;
+  camera = clampCurrentCamera(camera);
+  applyCameraTransform(true);
 }
 
-function handleTouchStart(event) {
-  if (imageViewer.isOpen() || event.touches.length !== 1) {
-    resetSwipeStart();
+function handlePointerEnd(event) {
+  if (!activePointers.has(event.pointerId)) return;
+
+  activePointers.delete(event.pointerId);
+  if (activePointers.size === 0) {
+    pointerGesture = null;
+    mindmap.classList.remove("is-panning");
     return;
   }
 
-  const touch = event.touches[0];
-  swipeStart = {
-    x: touch.clientX,
-    y: touch.clientY,
-    isVerticalSwipe: false,
+  pointerGesture = createPointerGesture();
+}
+
+function createPointerGesture() {
+  const touches = [...activePointers.values()];
+  return {
+    type: touches.length >= 2 ? "pinch" : "pan",
+    camera: { ...camera },
+    touches: touches.slice(0, 2),
   };
 }
 
-function handleTouchMove(event) {
-  if (!swipeStart || event.touches.length !== 1) {
-    return;
-  }
-
-  const touch = event.touches[0];
-  const dx = touch.clientX - swipeStart.x;
-  const dy = touch.clientY - swipeStart.y;
-  const isVerticalIntent =
-    Math.abs(dy) >= swipeNavigation.intentDistance &&
-    Math.abs(dy) > Math.abs(dx) * swipeNavigation.dominanceRatio;
-
-  if (swipeStart.isVerticalSwipe || isVerticalIntent) {
-    swipeStart.isVerticalSwipe = true;
-    event.preventDefault();
-  }
-}
-
-function handleTouchEnd(event) {
-  if (!swipeStart || event.changedTouches.length === 0) {
-    resetSwipeStart();
-    return;
-  }
-
-  const touch = event.changedTouches[0];
-  const dx = touch.clientX - swipeStart.x;
-  const dy = touch.clientY - swipeStart.y;
-  const isVerticalSwipe =
-    swipeStart.isVerticalSwipe &&
-    Math.abs(dy) >= swipeNavigation.minDistance &&
-    Math.abs(dy) > Math.abs(dx) * swipeNavigation.dominanceRatio;
-
-  if (isVerticalSwipe) {
-    event.preventDefault();
-    setActiveStepIndex(activeStepIndex + (dy < 0 ? 1 : -1));
-  }
-
-  resetSwipeStart();
-}
-
-function resetSwipeStart() {
-  swipeStart = null;
+function midpoint(points) {
+  return {
+    x: (points[0].x + points[1].x) / 2,
+    y: (points[0].y + points[1].y) / 2,
+  };
 }
 
 function clamp(value, min, max) {
@@ -234,7 +218,6 @@ function clamp(value, min, max) {
 
 function setActiveStepIndex(index) {
   activeStepIndex = Math.max(0, Math.min(index, presentationSteps.length));
-  cameraTargetIndex = null;
   render();
 }
 
@@ -243,11 +226,31 @@ function render() {
   const { activeNode, visibleEndIndex } = presentationState;
   currentNodeMetrics = measureAllNodes(preorder, activeNode);
   const model = activeNode ? buildVisibleModel(activeNode, visibleEndIndex) : buildEndModel();
-  const viewport = computeViewport(model, cameraTargetIndex);
+  currentModel = model;
+  currentBounds = computeBounds(model.nodes);
+  const viewport = getViewportSize();
+  const fittedCamera = computeFitCamera(currentBounds, viewport, VIEW_PADDING);
+  fitZoom = fittedCamera.zoom;
+  if (camera) {
+    const boundedZoom = clamp(camera.zoom, computeMinZoom(fitZoom), MAX_ZOOM);
+    const zoomAdjustedCamera =
+      boundedZoom === camera.zoom ? camera : zoomCameraAt(camera, boundedZoom, viewportCenter());
+    camera = reconcileCamera(
+      zoomAdjustedCamera,
+      currentBounds,
+      getNodeRect(model.nodes.find((node) => node.isActive)),
+      viewport,
+      VIEW_PADDING,
+      MIN_VISIBLE_CONTENT,
+    );
+  } else {
+    camera = fittedCamera;
+  }
 
   syncLinks(model.links);
   syncNodes(model.nodes, activeNode);
-  positionMapLayer(viewport, model);
+  updateCanvasSize(model);
+  applyCameraTransform();
   updateControls();
 }
 
@@ -477,113 +480,75 @@ function getNodeMetric(node) {
   };
 }
 
-function computeViewport(model, targetIndex = null) {
-  const viewportSize = getViewportSize();
-  const logicalViewport = {
-    width: viewportSize.width / cameraZoom,
-    height: viewportSize.height / cameraZoom,
-  };
-  if (model.nodes.length === 0) {
-    return { x: 0, y: 0, width: logicalViewport.width, height: logicalViewport.height };
+function updateCanvasSize(model) {
+  const width = Math.max(1, currentBounds.maxX + layout.stagePaddingX);
+  const height = Math.max(1, currentBounds.maxY + layout.stagePaddingY);
+
+  mapLayer.style.width = `${width}px`;
+  mapLayer.style.height = `${height}px`;
+  linkLayer.setAttribute("viewBox", `0 0 ${width} ${height}`);
+}
+
+function applyCameraTransform(isDirectManipulation = false) {
+  if (!camera) return;
+
+  mindmap.classList.toggle("is-direct-manipulation", isDirectManipulation);
+  mapLayer.style.transform = `scale(${camera.zoom}) translate(${-camera.x}px, ${-camera.y}px)`;
+  updateZoomControls();
+  if (isDirectManipulation) {
+    window.clearTimeout(applyCameraTransform.releaseTimer);
+    applyCameraTransform.releaseTimer = window.setTimeout(() => {
+      mindmap.classList.remove("is-direct-manipulation");
+    }, 120);
   }
+}
 
-  if (model.isEnd) {
-    return computeEndViewport(model, logicalViewport, targetIndex);
-  }
+function setCameraZoom(nextZoom, anchor = viewportCenter(), direct = false) {
+  if (!camera) return;
 
-  const pathNodes = model.nodes.filter((node) => node.isPath);
-  const pathMinX = Math.min(...pathNodes.map((node) => node.x - node.width / 2));
-  const pathMaxX = Math.max(...pathNodes.map((node) => node.x + node.width / 2));
-  const pathCenterX = (pathMinX + pathMaxX) / 2;
-  const activeNode = model.nodes.find((node) => node.isActive);
-  const targetNode =
-    targetIndex === null ? activeNode : model.nodes.find((node) => node.preorderIndex === targetIndex) ?? activeNode;
-  let viewportX = pathCenterX - logicalViewport.width / 2;
-  let viewportY = model.baseline - logicalViewport.height / 2;
+  const zoom = clamp(nextZoom, computeMinZoom(fitZoom), MAX_ZOOM);
+  camera = zoomCameraAt(camera, zoom, anchor);
+  camera = clampCurrentCamera(camera);
+  applyCameraTransform(direct);
+}
 
-  if (targetNode) {
-    viewportX = keepNodeInCenterBand(viewportX, logicalViewport.width, targetNode.x, layout.cameraTargetCenterBand);
-    viewportY = keepNodeInCenterBand(viewportY, logicalViewport.height, targetNode.y, layout.cameraTargetCenterBand);
-  }
+function fitView() {
+  if (!currentBounds) return;
+  camera = computeFitCamera(currentBounds, getViewportSize(), VIEW_PADDING);
+  fitZoom = camera.zoom;
+  applyCameraTransform();
+}
 
+function handleResize() {
+  if (!camera || !currentBounds) return;
+  fitZoom = computeFitCamera(currentBounds, getViewportSize(), VIEW_PADDING).zoom;
+  const boundedZoom = clamp(camera.zoom, computeMinZoom(fitZoom), MAX_ZOOM);
+  camera = boundedZoom === camera.zoom ? camera : zoomCameraAt(camera, boundedZoom, viewportCenter());
+  camera = clampCurrentCamera(camera);
+  applyCameraTransform();
+}
+
+function clampCurrentCamera(nextCamera) {
+  return clampCamera(nextCamera, currentBounds, getViewportSize(), MIN_VISIBLE_CONTENT);
+}
+
+function viewportCenter() {
+  const viewport = getViewportSize();
+  return { x: viewport.width / 2, y: viewport.height / 2 };
+}
+
+function pointerInCanvas(clientX, clientY) {
+  const rect = mindmap.getBoundingClientRect();
+  return { x: clientX - rect.left, y: clientY - rect.top };
+}
+
+function getNodeRect(node) {
+  if (!node) return null;
   return {
-    x: viewportX,
-    y: viewportY,
-    width: logicalViewport.width,
-    height: logicalViewport.height,
-  };
-}
-
-function computeEndViewport(model, logicalViewport, targetIndex = null) {
-  const bounds = computeModelBounds(model.nodes);
-  const graphCenterX = (bounds.minX + bounds.maxX) / 2;
-  const graphCenterY = (bounds.minY + bounds.maxY) / 2;
-  const targetNode = model.nodes.find((node) => node.preorderIndex === targetIndex);
-  let viewportX = graphCenterX - logicalViewport.width / 2;
-  let viewportY = graphCenterY - logicalViewport.height / 2;
-
-  if (targetNode) {
-    viewportX = keepNodeInCenterBand(viewportX, logicalViewport.width, targetNode.x, layout.cameraTargetCenterBand);
-    viewportY = keepNodeInCenterBand(viewportY, logicalViewport.height, targetNode.y, layout.cameraTargetCenterBand);
-  }
-
-  return {
-    x: viewportX,
-    y: viewportY,
-    width: logicalViewport.width,
-    height: logicalViewport.height,
-  };
-}
-
-function computeModelBounds(nodes) {
-  return nodes.reduce(
-    (bounds, node) => ({
-      minX: Math.min(bounds.minX, node.x - node.width / 2),
-      maxX: Math.max(bounds.maxX, node.x + node.width / 2),
-      minY: Math.min(bounds.minY, node.y - node.height / 2),
-      maxY: Math.max(bounds.maxY, node.y + node.height / 2),
-    }),
-    {
-      minX: Infinity,
-      maxX: -Infinity,
-      minY: Infinity,
-      maxY: -Infinity,
-    },
-  );
-}
-
-function keepNodeInCenterBand(viewportStart, viewportSize, nodeCenter, centerBandRatio) {
-  const bandPadding = (viewportSize * (1 - centerBandRatio)) / 2;
-  const bandStart = viewportStart + bandPadding;
-  const bandEnd = viewportStart + viewportSize - bandPadding;
-
-  if (nodeCenter < bandStart) {
-    return nodeCenter - bandPadding;
-  }
-
-  if (nodeCenter > bandEnd) {
-    return nodeCenter - viewportSize + bandPadding;
-  }
-
-  return viewportStart;
-}
-
-function positionMapLayer(viewport, model) {
-  const canvas = computeCanvasSize(model, viewport);
-
-  mapLayer.style.width = `${canvas.width}px`;
-  mapLayer.style.height = `${canvas.height}px`;
-  linkLayer.setAttribute("viewBox", `0 0 ${canvas.width} ${canvas.height}`);
-  mapLayer.style.transform = `scale(${cameraZoom}) translate(${-viewport.x}px, ${-viewport.y}px)`;
-}
-
-function computeCanvasSize(model, viewport) {
-  const maxNodeRight = model.nodes.reduce((maxRight, node) => Math.max(maxRight, node.x + node.width / 2), 0);
-  const maxNodeBottom = model.nodes.reduce((maxBottom, node) => Math.max(maxBottom, node.y + node.height / 2), 0);
-
-  return {
-    width: Math.max(viewport.x + viewport.width, maxNodeRight + layout.stagePaddingX),
-    height: Math.max(viewport.y + viewport.height, maxNodeBottom + layout.stagePaddingY),
+    minX: node.x - node.width / 2,
+    maxX: node.x + node.width / 2,
+    minY: node.y - node.height / 2,
+    maxY: node.y + node.height / 2,
   };
 }
 
@@ -628,7 +593,6 @@ function syncNodes(nodes, activeNode) {
       entry.group.classList.toggle("active", node.isActive);
       entry.group.classList.toggle("path-node", node.isPath);
       entry.group.classList.toggle("complete-node", node.isComplete);
-      entry.group.classList.toggle("camera-target", node.preorderIndex === cameraTargetIndex);
       entry.group.dataset.nodeId = node.id;
       if (activeNode && node.id === activeNode.id) {
         entry.group.setAttribute("aria-current", "true");
@@ -668,14 +632,12 @@ function createNodeElement(node) {
 }
 
 function focusCameraOnNode(nodeId) {
-  const node = idToNode.get(nodeId);
-  if (!node) {
-    return;
-  }
+  const node = currentModel?.nodes.find((item) => item.id === nodeId);
+  if (!node || !camera) return;
 
-  const activeNode = presentationSteps[activeStepIndex]?.node;
-  cameraTargetIndex = node.id === activeNode?.id ? null : node.preorderIndex;
-  render();
+  camera = ensureRectVisible(camera, getNodeRect(node), getViewportSize(), VIEW_PADDING);
+  camera = clampCurrentCamera(camera);
+  applyCameraTransform();
 }
 
 function createNodeContent() {
@@ -842,14 +804,21 @@ function updateControls() {
   counter.textContent = `${activeStepIndex + 1} / ${endIndex + 1}`;
   nodeSlider.value = String(activeStepIndex);
   nodeSlider.style.setProperty("--slider-progress", `${sliderProgress}%`);
-  zoomSlider.value = String(Math.round(cameraZoom * 100));
-  zoomValue.textContent = `${Math.round(cameraZoom * 100)}%`;
-  activeScaleSlider.value = String(Math.round(activeScale * 100));
-  activeScaleValue.textContent = `${activeScale.toFixed(2)}x`;
-  nodeLayer.style.setProperty("--active-node-scale", activeScale.toFixed(2));
+  previousStepButton.disabled = activeStepIndex === 0;
+  nextStepButton.disabled = isEnd;
+  updateZoomControls();
   nextNodePreview.classList.toggle("has-subtitle", label.hasSubtitle);
   nextNodeSubtitle.textContent = label.subtitle;
   nextNodeTitle.textContent = label.title;
+}
+
+function updateZoomControls() {
+  if (!camera) return;
+  const minZoom = computeMinZoom(fitZoom);
+  zoomSlider.min = String(Math.round(minZoom * 100));
+  zoomSlider.max = String(MAX_ZOOM * 100);
+  zoomSlider.value = String(Math.round(camera.zoom * 100));
+  zoomValue.textContent = `${Math.round(camera.zoom * 100)}%`;
 }
 
 function getNextStepLabel(nextNode, isEnd) {

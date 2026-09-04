@@ -77,13 +77,15 @@ The dev server is a dependency-free Node.js static server. If `5173` is occupied
 
 ## Interaction Rules
 
-- Up/down arrow keys move to the previous/next logic unit. Legacy decks without `@unit` still move one preorder node at a time.
-- Top arrow buttons do the same.
+- Arrow keys, Page Up/Page Down, Space, and Shift+Space move between logic units. Legacy decks without `@unit` still move one preorder node at a time.
+- Bottom arrow buttons do the same.
 - The range slider jumps directly to a presentation unit.
-- The zoom slider controls camera distance, scaling the whole canvas from about `70%` to `140%`; default is `100%`.
-- The second control row shows the current node label and next node label.
-- Clicking a visible node moves the camera toward that node's current-layout position without changing the selected node or expanded image. Move the camera as little as possible: if the clicked node is already inside the central 40% of the viewport, do not move; otherwise shift just enough to bring it into that central band.
-- Changing the selected node should use the same central 40% camera rule: move as little as possible to bring the selected node into that central band.
+- Wheel and trackpad input pan the canvas; Ctrl/Command + wheel zooms around the pointer.
+- Dragging empty canvas pans it. Touch supports one-finger pan and two-finger pan/zoom.
+- The zoom slider uses a dynamic minimum derived from fit view and a fixed `200%` maximum. “适应画布” fits all currently revealed content with padding.
+- Camera state persists across presentation steps. Changing the selected unit must not reset a valid user camera; nudge only when the new active node is fully outside the viewport.
+- Clicking a visible node never changes the selected node or expanded image. If it is already visible, keep the camera unchanged; otherwise shift only enough to reveal it.
+- Wheel and swipe gestures must never advance presentation steps. Presentation rhythm and canvas navigation are separate interaction layers.
 
 Keep all navigation paths going through `setActiveStepIndex()` so buttons, keyboard, slider, graph, and counter stay synchronized.
 
@@ -94,12 +96,11 @@ Keep all navigation paths going through `setActiveStepIndex()` so buttons, keybo
 - Unvisited nodes are completely hidden and occupy no layout space.
 - The horizontal selected path should stay visually stable.
 - Default node and text sizing is intentionally large, roughly 30% larger than the original compact demo.
-- The camera pans across a fixed logical canvas and must not auto-scale nodes or text because of browser aspect ratio. Node and font sizes stay in CSS pixels unless the user changes the zoom slider.
-- The zoom slider is the only intended way to scale the whole canvas.
+- The camera pans and zooms across a fixed logical canvas. Slider, Ctrl/Command + wheel, and pinch are equivalent zoom inputs.
 - The visible viewport uses the actual `#mindmap` element size. The presentation stage should stretch with the browser window.
 - `layout.centerBaseline = 520` controls the horizontal path's baseline in logical canvas coordinates.
-- Completed branches are allowed to exceed the viewport and be clipped. Do not scale the camera view to fit them, because that makes nodes and text smaller.
-- When long path labels push nodes toward the viewport edge, the camera should shift just enough to place the selected or clicked node inside the central 40% band.
+- Completed branches may exceed the viewport. Users can pan, zoom out, or use fit view to inspect them.
+- Soft pan bounds must always leave at least a small strip of content visible so the graph cannot be lost completely.
 - Image nodes participate in normal layout. The node box must grow to contain the thumbnail or expanded image.
 - Expanded images may increase node height; camera logic should still use the central 40% band rule for the selected node.
 - SVG links should connect from node border to node border, using the full node box dimensions.
@@ -143,14 +144,12 @@ Keep all navigation paths going through `setActiveStepIndex()` so buttons, keybo
 
 ## Style Notes
 
-- Keep the visual style light, presentation-friendly, and restrained.
-- Existing palette:
-  - dark selected node: `#183a4a`
-  - orange accent: `#d8894f`
-  - completed node fill: `#eef7f3`
-  - path node fill: `#fffdf8`
-- Cards and buttons use small `8px` radii.
-- Avoid adding heavy decorative effects or large layout shifts.
+- Treat the page as a quiet creative workspace, not an AI dashboard.
+- Canvas palette: deep gray `#1e1e1e`, low-contrast dots `#363636`, solid toolbar `#262626`, divider `#3c3c3c`.
+- Content palette: paper nodes `#fcfcfa`, ink `#171717`, muted text `#a3a39d`, active outline `#6f92ff`.
+- Keep title treatment plain and typographic. Controls belong in one compact solid bottom toolbar.
+- Nodes use subtle borders/shadows and small radii. Active state is a cobalt outline, never a dark fill, orange glow, or exaggerated scale.
+- Do not add glass panels, gradient blobs, floating color orbits, letter-grid icons, decorative eyebrow labels, or multiple status colors.
 
 ## Development Notes
 

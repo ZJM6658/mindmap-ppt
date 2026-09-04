@@ -20,11 +20,11 @@ export const sourceMarkdown = `
       @unit
       @image generated/controls-navigation.png
         - 顺序推进
-          上下键或滚轮前进后退
+          方向键或空格切换单元
         - 跳到重点
           进度滑条定位任意节点
         - 调整视野
-          缩放滑条调整画布距离
+          滚轮平移双指缩放
           - 临时查看
             点击节点只移动视角
     - 让 Agent 制作
