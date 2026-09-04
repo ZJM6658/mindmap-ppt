@@ -1,4 +1,4 @@
 interface:
   display_name: "Mindmap PPT Builder"
-  short_description: "Turn prose into project/source.js mind-map presentations with matching illustrations"
-  default_prompt: "Use this skill to turn the provided document into a project/source.js mind-map for agegr/mindmap-ppt, generate fitting illustrations for selected nodes when possible, and validate the project."
+  short_description: "Turn prose into logic-unit mind-map presentations with matching illustrations"
+  default_prompt: "Use this skill to turn the provided document into a logic-unit mind-map presentation for mindmap-ppt, generate fitting illustrations for selected units when useful, and validate the project."

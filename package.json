@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "node scripts/dev-server.js",
-    "check": "node --check src/main.js"
+    "check": "node --check src/main.js && node --check src/presentation-model.js && node --check src/interaction.js",
+    "test": "node --test"
   },
   "dependencies": {},
   "devDependencies": {}

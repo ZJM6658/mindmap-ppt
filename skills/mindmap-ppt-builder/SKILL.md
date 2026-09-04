@@ -1,13 +1,13 @@
 ---
 name: mindmap-ppt-builder
-description: Create or update content for the agegr/mindmap-ppt static presentation project from a prose draft, article, speech, report, or notes. Use when Codex needs to turn a written document into the project's project/source.js Markdown mind-map data, choose which nodes need illustrations, generate or request GPT Image 2 illustrations matching the project's restrained presentation style, place assets under project/, and validate the result with npm run check. Operates only within the current working directory.
+description: Use when turning a prose draft, article, speech, report, or notes into project/source.js content and illustrations for the mindmap-ppt presentation project. Operates only within the current working directory.
 ---
 
 # Mindmap PPT Builder
 
 ## Goal
 
-Turn a user-provided source document into a presentation-ready `project/source.js` for this repo. The source document may be pasted text in the conversation or a local text/Markdown file path supplied by the user. The output is a preorder mind-map: concise two-line nodes, optional node images, and local assets that match the current light PPT style.
+Turn a user-provided source document into a presentation-ready `project/source.js` for this repo. The source document may be pasted text in the conversation or a local text/Markdown file path supplied by the user. The output is a preorder mind-map organized into speaking-sized logic units, with concise two-line nodes, optional images, and local assets that match the current light PPT style.
 
 Read `references/project-format.md` when you need exact project file conventions or visual constraints.
 
@@ -15,7 +15,7 @@ Read `references/project-format.md` when you need exact project file conventions
 
 This skill operates only within the current working directory tree (cwd itself or a `mindmap-ppt/` subfolder under it). Do not search parent, sibling, or home directories for an existing checkout.
 
-- Clone `https://github.com/agegr/mindmap-ppt` into `./mindmap-ppt/` under the current working directory and `cd` in.
+- Clone `https://github.com/ZJM6658/mindmap-ppt` into `./mindmap-ppt/` under the current working directory and `cd` in.
 - If `./mindmap-ppt/` already exists, stop and ask the user how to proceed. Do not `cd ..`, `find`, or otherwise probe the filesystem to locate or create a checkout elsewhere.
 - Keep the application repository outside the skill folder. Do not copy or clone `index.html`, `src/`, or `project/` into `.agents/skills/mindmap-ppt-builder/`.
 - Normal skill output should modify only `project/source.js` and local asset files under `project/`.
@@ -38,7 +38,13 @@ This skill operates only within the current working directory tree (cwd itself o
    - major branches: usually 2-4 sections, but follow the source logic when another structure is clearer
    - child nodes: use them for causes, consequences, evidence, examples, process steps, contrasts, or supplements
    - depth: add levels only when nesting makes the author's logic easier to understand
-4. Write each node as one unordered-list item plus an optional continuation line:
+4. Divide the talk into logic units before writing nodes:
+   - A logic unit is one coherent speaking beat that the presenter should reveal with a single “next” action.
+   - Mark the root as the opening unit. Mark each major section that starts a new claim, phase, comparison, or conclusion as another unit.
+   - Keep evidence, examples, explanations, and supporting details inside their parent's unit unless the presenter genuinely needs to pause and introduce them separately.
+   - A typical unit contains a main node plus 2-6 supporting nodes and should carry roughly 30-120 seconds of speech. These are judgment guides, not hard quotas.
+   - The number of units should be meaningfully smaller than the number of nodes. If nearly every node is marked, regroup before finalizing.
+5. Write each node as one unordered-list item plus an optional continuation line:
 
 ```md
 - 副标题
@@ -47,21 +53,36 @@ This skill operates only within the current working directory tree (cwd itself o
 
 Use the first line as a short category label and the second line as the main message. Keep each line under about 30 Chinese characters or 8 English words. Prefer two-line labels for all visible nodes; use a single-line node only when the label is already extremely short and clear.
 
-5. Choose image nodes sparingly:
+6. Add `@unit` after the visible label of every logic-unit root:
+
+```md
+- 开场
+  为什么现在需要改变
+  @unit
+    - 用户痛点
+      重复操作打断表达
+    - 业务影响
+      演示节奏持续拖慢
+```
+
+The player reveals every preorder node from one `@unit` marker up to the next marker in a single step. Always emit `@unit` for newly generated decks; the marker-free mode exists only for compatibility with older content.
+
+7. Choose image nodes sparingly:
    - Node images are optional.
    - A mind-map necessarily omits a lot of source detail; use images to preserve or explain the omitted detail on high-information nodes.
+   - Prefer one primary image on the root of an image-worthy logic unit. Add internal node images only when they explain distinct evidence or a different visual model.
    - Pick 3-8 high-information nodes for a typical deck; short drafts may use 0-2 images.
    - Prefer nodes that summarize a process, architecture, comparison, timeline, metric, or conceptual model.
-6. Generate illustrations for chosen nodes with GPT Image 2 or the available image generation tool. Save them under `project/` or a subfolder of `project/`.
+8. Generate illustrations for chosen nodes with GPT Image 2 or the available image generation tool. Save them under `project/` or a subfolder of `project/`.
    - Prefer PNG for generated raster illustrations, SVG for diagrams or placeholders, and JPG for photo-like assets.
    - If image generation is unavailable, either omit images or create simple SVG placeholder diagrams under `project/` using the same restrained palette. Use 16:10 composition, minimal short text only when useful, and descriptive kebab-case filenames such as `project/demo-flow.svg`.
-7. Reference images in Markdown metadata lines:
+9. Reference images in Markdown metadata lines:
 
 ```md
   @image process-overview.png
 ```
 
-8. Replace `project/source.js` with:
+10. Replace `project/source.js` with:
 
 ```js
 export const sourceMarkdown = `
@@ -71,8 +92,8 @@ export const sourceMarkdown = `
 
 Escape backticks and `${...}` sequences before writing user-derived text inside the JavaScript template string.
 
-9. Run `npm run check`.
-10. Optional visual validation: run `npm run dev` and inspect the URL printed by Vite (default `http://127.0.0.1:5173/`, may differ if the port is taken) when browser inspection is available.
+11. Run `npm test` and `npm run check`.
+12. Preview the deck when browser inspection is available. Confirm that one navigation action reveals one coherent unit, images render, and the talk no longer requires a separate action for every supporting node.
 
 ## Mindmap Authoring Rules
 
@@ -80,6 +101,8 @@ Escape backticks and `${...}` sequences before writing user-derived text inside 
 - Let the hierarchy express the author's logic structure. If cause A leads to result B, B can be a child node of A; if B further leads to result C, form an `A -> B -> C` subtree.
 - The only hard principle is clarity: a reader should understand why each child node belongs under its parent and what relationship is being expressed.
 - Follow the source order. This app reveals nodes in preorder: parent first, then all children. Do not move conclusions from later text into earlier parent labels.
+- Treat tree structure and presentation rhythm as separate decisions. Nodes preserve the material's logic; `@unit` markers define when the presenter advances.
+- A new unit begins at an `@unit` node and continues through all following preorder nodes until the next `@unit`. Place every boundary deliberately.
 - Do not repeat the root topic in child nodes. If the root already states the problem or theme, children should advance the story.
 - Group nearby meanings under one parent. Keep backgrounds, criteria, risks, product/tool inventories, recommendations, and conclusions in their own coherent branches.
 - Main nodes carry judgments; child nodes carry evidence, reasons, examples, or supplements. If a node explains another node, make it a child, not a sibling.
@@ -91,17 +114,19 @@ Escape backticks and `${...}` sequences before writing user-derived text inside 
 - Parent labels should summarize and navigate; child labels should reveal specifics. Avoid parent labels that spoil later details.
 - Put images on high-information nodes, such as framework, comparison, inventory, recommendation, or risk-model nodes. Avoid images on very small detail nodes.
 
-## Markdown And Image Example
+## Markdown, Logic Unit, And Image Example
 
-Use `@image` as a metadata continuation line after the node's visible two-line label. The `@image` line is not displayed as node text.
+Use `@unit` and `@image` as metadata continuation lines after the node's visible two-line label. Neither line is displayed as node text.
 
 ```js
 export const sourceMarkdown = `
 - 产品发布
   三分钟讲清楚新功能
+  @unit
   @image overview.png
     - 用户痛点
       当前流程成本很高
+      @unit
       @image image-asset-1/pain-points.jpg
     - 解决方案
       自动整理文稿和插图
@@ -110,6 +135,8 @@ export const sourceMarkdown = `
       @image diagrams/demo-flow.svg
 `;
 ```
+
+This example has two presentation steps: the opening unit, then the user-pain unit containing the remaining solution and demo nodes. The active unit root image expands; other images inside the unit remain visible as clickable thumbnails.
 
 Image paths are relative to `project/` by default:
 
@@ -142,6 +169,7 @@ When no image-generation tool is available but an illustration is still useful, 
 
 ## Image And Asset Rules
 
+- Place `@unit` after a node's visible title and before its children.
 - Use `@image` only after the node's title line, before its children.
 - Use PNG, JPG/JPEG, or SVG assets.
 - Save image files under `project/` or a subfolder of `project/`.
@@ -150,5 +178,8 @@ When no image-generation tool is available but an illustration is still useful, 
 ## Validation Checklist
 
 - `project/source.js` exports `sourceMarkdown`.
+- The root and every intended speaking boundary have `@unit`.
+- Units are materially fewer than nodes and each unit carries a coherent point.
 - Asset files exist for every `@image`.
+- `npm test` passes.
 - `npm run check` passes.

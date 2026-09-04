@@ -47,6 +47,11 @@ This is a small static front-end demo for a PPT-like animated mind map.
   - For example, `@image image-asset-1/a.jpg` resolves to `./project/image-asset-1/a.jpg`.
   - Explicit relative paths such as `./project/image-asset-1/a.jpg`, absolute paths, data URLs, and HTTP(S) URLs remain supported when needed.
   - If multiple `@image` lines are added to one node, the latest parsed value wins.
+- `@unit` marks the start of one presentation logic unit and is metadata only:
+  - A step starts at an `@unit` node and reveals that node plus every following preorder node up to the next `@unit`.
+  - Mark the root and each major talk section with `@unit` for normal Agent-generated decks.
+  - Keep evidence, examples, and supporting details inside their parent's unit unless they need their own speaking beat.
+  - If a deck contains no `@unit`, navigation falls back to the legacy one-node-per-step behavior.
 - Illustrations render inside their node card:
   - selected image nodes show the image expanded below the node text
   - non-selected image nodes show a small thumbnail below the node text
@@ -72,15 +77,15 @@ The dev server is a dependency-free Node.js static server. If `5173` is occupied
 
 ## Interaction Rules
 
-- Up/down arrow keys move to previous/next preorder node.
+- Up/down arrow keys move to the previous/next logic unit. Legacy decks without `@unit` still move one preorder node at a time.
 - Top arrow buttons do the same.
-- The range slider jumps directly to a preorder index.
+- The range slider jumps directly to a presentation unit.
 - The zoom slider controls camera distance, scaling the whole canvas from about `70%` to `140%`; default is `100%`.
 - The second control row shows the current node label and next node label.
 - Clicking a visible node moves the camera toward that node's current-layout position without changing the selected node or expanded image. Move the camera as little as possible: if the clicked node is already inside the central 40% of the viewport, do not move; otherwise shift just enough to bring it into that central band.
 - Changing the selected node should use the same central 40% camera rule: move as little as possible to bring the selected node into that central band.
 
-Keep all navigation paths going through `setActiveIndex()` so buttons, keyboard, slider, graph, and counter stay synchronized.
+Keep all navigation paths going through `setActiveStepIndex()` so buttons, keyboard, slider, graph, and counter stay synchronized.
 
 ## Layout Rules
 

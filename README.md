@@ -22,13 +22,13 @@
 安装到当前环境：
 
 ```bash
-npx skills add agegr/mindmap-ppt --skill mindmap-ppt-builder
+npx skills add ZJM6658/mindmap-ppt --skill mindmap-ppt-builder
 ```
 
 安装到 Codex 全局 skill：
 
 ```bash
-npx skills add agegr/mindmap-ppt --skill mindmap-ppt-builder --agent codex --global
+npx skills add ZJM6658/mindmap-ppt --skill mindmap-ppt-builder --agent codex --global
 ```
 
 
@@ -46,10 +46,12 @@ http://127.0.0.1:5173/
 
 ## 播放操作
 
-- 上一个 / 下一个节点：方向键、Page Up / Page Down、滚轮或顶部按钮
-- 跳到指定节点：拖动进度滑条
+- 上一个 / 下一个逻辑单元：方向键、Page Up / Page Down、滚轮或顶部按钮
+- 跳到指定逻辑单元：拖动进度滑条
 - 调整画布大小：拖动 Zoom 滑条
 - 临时查看节点：点击可见节点移动视角，不改变当前播放进度
+
+Agent 会用 `@unit` 标记讲述节拍。一次翻页会展开当前逻辑单元中的全部节点；单元和内部节点都可以继续使用 `@image` 添加图片。没有 `@unit` 的旧内容仍按节点逐个播放。
 
 ## 部署
 

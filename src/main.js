@@ -1,4 +1,12 @@
 import { sourceMarkdown } from "../project/source.js";
+import { handleImageButtonKeydown } from "./interaction.js";
+import {
+  assignTreeMetadata,
+  buildPresentationSteps,
+  collectPreorder,
+  getPresentationState,
+  parseMarkdownTree,
+} from "./presentation-model.js";
 
 const mindmap = document.querySelector("#mindmap");
 const mapLayer = document.querySelector("#mapLayer");
@@ -41,9 +49,10 @@ const swipeNavigation = {
   dominanceRatio: 1.25,
 };
 
-let activeIndex = 0;
+let activeStepIndex = 0;
 let root = parseMarkdownTree(sourceMarkdown);
 let preorder = [];
+let presentationSteps = [];
 let idToNode = new Map();
 let renderedNodes = new Map();
 let renderedLinks = new Map();
@@ -57,8 +66,9 @@ let swipeStart = null;
 
 assignTreeMetadata(root);
 preorder = collectPreorder(root);
+presentationSteps = buildPresentationSteps(preorder);
 idToNode = new Map(preorder.map((node) => [node.id, node]));
-nodeSlider.max = String(preorder.length);
+nodeSlider.max = String(presentationSteps.length);
 updateDeckHeading(root.label);
 
 controlsToggle.addEventListener("click", () => {
@@ -71,7 +81,7 @@ controlsToggle.addEventListener("click", () => {
   controlsToggle.querySelector("span").textContent = isCollapsed ? "+" : "−";
 });
 nodeSlider.addEventListener("input", (event) => {
-  setActiveIndex(Number(event.target.value));
+  setActiveStepIndex(Number(event.target.value));
 });
 zoomSlider.addEventListener("input", (event) => {
   cameraZoom = Number(event.target.value) / 100;
@@ -110,7 +120,7 @@ function handleKeydown(event) {
   const step = stepByKey[event.key];
   if (step) {
     event.preventDefault();
-    setActiveIndex(activeIndex + step);
+    setActiveStepIndex(activeStepIndex + step);
   }
 }
 
@@ -136,7 +146,7 @@ function handleWheel(event) {
     return;
   }
 
-  setActiveIndex(activeIndex + step);
+  setActiveStepIndex(activeStepIndex + step);
   wheelDeltaBuffer -= step * wheelNavigation.threshold;
   scheduleWheelBufferReset();
 }
@@ -208,7 +218,7 @@ function handleTouchEnd(event) {
 
   if (isVerticalSwipe) {
     event.preventDefault();
-    setActiveIndex(activeIndex + (dy < 0 ? 1 : -1));
+    setActiveStepIndex(activeStepIndex + (dy < 0 ? 1 : -1));
   }
 
   resetSwipeStart();
@@ -218,111 +228,21 @@ function resetSwipeStart() {
   swipeStart = null;
 }
 
-function parseMarkdownTree(markdown) {
-  const stack = [];
-  let nextId = 0;
-  let parsedRoot = null;
-
-  markdown
-    .split("\n")
-    .filter((line) => line.trim())
-    .forEach((line) => {
-      const itemMatch = line.match(/^(\s*)-\s+(.+)$/);
-      if (!itemMatch) {
-        const continuationMatch = line.match(/^(\s+)(\S.*)$/);
-        if (continuationMatch && stack.length > 0) {
-          const indent = continuationMatch[1].replace(/\t/g, "    ").length;
-          const continuationParent = findContinuationParent(stack, indent);
-          const continuationText = continuationMatch[2].trim();
-
-          if (continuationParent) {
-            if (continuationText.startsWith("@image ")) {
-              continuationParent.image = resolveImagePath(continuationText.slice("@image ".length).trim());
-              return;
-            }
-
-            continuationParent.label = `${continuationParent.label}\n${continuationText}`;
-          }
-        }
-
-        return;
-      }
-
-      const indent = itemMatch[1].replace(/\t/g, "    ").length;
-
-      while (stack.length > 0 && stack[stack.length - 1].indent >= indent) {
-        stack.pop();
-      }
-
-      const depth = stack.length;
-      const node = {
-        id: `node-${nextId++}`,
-        label: itemMatch[2].trim(),
-        children: [],
-        parent: null,
-        depth,
-        image: "",
-        preorderIndex: 0,
-      };
-
-      if (depth === 0) {
-        parsedRoot = node;
-      } else {
-        const parent = stack[depth - 1].node;
-        node.parent = parent;
-        parent.children.push(node);
-      }
-
-      stack.push({ node, indent });
-    });
-
-  return parsedRoot;
-}
-
-function findContinuationParent(stack, indent) {
-  for (let index = stack.length - 1; index >= 0; index -= 1) {
-    if (stack[index].indent <= indent) {
-      return stack[index].node;
-    }
-  }
-
-  return stack[stack.length - 1]?.node ?? null;
-}
-
-function assignTreeMetadata(treeRoot) {
-  collectPreorder(treeRoot).forEach((node, index) => {
-    node.preorderIndex = index;
-  });
-}
-
-function resolveImagePath(path) {
-  if (/^(https?:|data:|\/|\.\/|\.\.\/)/.test(path)) {
-    return path;
-  }
-
-  return `./project/${path}`;
-}
-
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
-function collectPreorder(node, list = []) {
-  list.push(node);
-  node.children.forEach((child) => collectPreorder(child, list));
-  return list;
-}
-
-function setActiveIndex(index) {
-  activeIndex = Math.max(0, Math.min(index, preorder.length));
+function setActiveStepIndex(index) {
+  activeStepIndex = Math.max(0, Math.min(index, presentationSteps.length));
   cameraTargetIndex = null;
   render();
 }
 
 function render() {
-  const activeNode = preorder[activeIndex] ?? null;
+  const presentationState = getPresentationState(presentationSteps, activeStepIndex, preorder);
+  const { activeNode, visibleEndIndex } = presentationState;
   currentNodeMetrics = measureAllNodes(preorder, activeNode);
-  const model = activeNode ? buildVisibleModel(activeNode) : buildEndModel();
+  const model = activeNode ? buildVisibleModel(activeNode, visibleEndIndex) : buildEndModel();
   const viewport = computeViewport(model, cameraTargetIndex);
 
   syncLinks(model.links);
@@ -405,10 +325,10 @@ function buildEndModel() {
   return { nodes, links, baseline: layout.centerBaseline, isEnd: true };
 }
 
-function buildVisibleModel(activeNode) {
+function buildVisibleModel(activeNode, visibleEndIndex) {
   const path = pathToRoot(activeNode);
   const pathIds = new Set(path.map((node) => node.id));
-  const visibleIds = new Set(preorder.slice(0, activeIndex + 1).map((node) => node.id));
+  const visibleIds = new Set(preorder.slice(0, visibleEndIndex + 1).map((node) => node.id));
   const positions = new Map();
   const nodes = [];
   const links = [];
@@ -737,7 +657,8 @@ function createNodeElement(node) {
   });
 
   const content = createNodeContent();
-  updateNodeContent(content, node, node.preorderIndex === activeIndex);
+  const activeNode = presentationSteps[activeStepIndex]?.node;
+  updateNodeContent(content, node, node.id === activeNode?.id);
   group.append(content.root);
   requestAnimationFrame(() => {
     requestAnimationFrame(() => group.classList.remove("entering"));
@@ -752,7 +673,8 @@ function focusCameraOnNode(nodeId) {
     return;
   }
 
-  cameraTargetIndex = node.preorderIndex === activeIndex ? null : node.preorderIndex;
+  const activeNode = presentationSteps[activeStepIndex]?.node;
+  cameraTargetIndex = node.id === activeNode?.id ? null : node.preorderIndex;
   render();
 }
 
@@ -776,9 +698,7 @@ function createNodeContent() {
       imageViewer.open(src, imageWrap.dataset.previewAlt || "节点插图");
     }
   });
-  imageWrap.addEventListener("keydown", (event) => {
-    event.stopPropagation();
-  });
+  imageWrap.addEventListener("keydown", handleImageButtonKeydown);
 
   const image = document.createElement("img");
   imageWrap.appendChild(image);
@@ -913,15 +833,14 @@ function linkPath(link) {
 }
 
 function updateControls() {
-  const activeNode = preorder[activeIndex];
-  const nextNode = preorder[activeIndex + 1];
-  const endIndex = preorder.length;
-  const isEnd = activeIndex === endIndex;
-  const sliderProgress = endIndex === 0 ? 0 : (activeIndex / endIndex) * 100;
+  const nextNode = presentationSteps[activeStepIndex + 1]?.node;
+  const endIndex = presentationSteps.length;
+  const isEnd = activeStepIndex === endIndex;
+  const sliderProgress = endIndex === 0 ? 0 : (activeStepIndex / endIndex) * 100;
   const label = getNextStepLabel(nextNode, isEnd);
 
-  counter.textContent = `${activeIndex + 1} / ${endIndex + 1}`;
-  nodeSlider.value = String(activeIndex);
+  counter.textContent = `${activeStepIndex + 1} / ${endIndex + 1}`;
+  nodeSlider.value = String(activeStepIndex);
   nodeSlider.style.setProperty("--slider-progress", `${sliderProgress}%`);
   zoomSlider.value = String(Math.round(cameraZoom * 100));
   zoomValue.textContent = `${Math.round(cameraZoom * 100)}%`;

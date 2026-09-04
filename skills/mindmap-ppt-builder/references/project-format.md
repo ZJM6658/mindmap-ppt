@@ -2,7 +2,7 @@
 
 ## Repository
 
-Target repo: `https://github.com/agegr/mindmap-ppt`
+Target repo: `https://github.com/ZJM6658/mindmap-ppt`
 
 Core files:
 
@@ -20,9 +20,11 @@ Use this shape:
 export const sourceMarkdown = `
 - Markdown Mindmap
   项目汇报思维导图演示
+  @unit
   @image overview.png
     - 需求分析
       用户目标与演示场景
+      @unit
 `;
 ```
 
@@ -31,11 +33,21 @@ Parsing rules:
 - Lines matching `- text` create nodes.
 - Indented continuation lines add to the current node label.
 - `@image path` attaches one image to the current node and is not visible text.
+- `@unit` marks the current node as the start of a presentation logic unit and is not visible text.
 - Short image paths such as `overview.png` resolve to `./project/overview.png`.
 - Nested short paths such as `image-asset-1/a.jpg` resolve to `./project/image-asset-1/a.jpg`.
 - Explicit paths beginning with `./`, `../`, `/`, `http:`, `https:`, or `data:` are used as-is.
 - Multiple `@image` lines on one node: last one wins.
 - The tree is traversed preorder.
+
+## Logic Unit Behavior
+
+- A logic unit begins at an `@unit` node and includes every following preorder node up to the next `@unit`.
+- One next/previous action moves between logic units and reveals the whole target unit at once.
+- Mark the root as the opening unit, then mark each major section that deserves a separate speaking beat.
+- Supporting evidence, examples, and details normally stay unmarked inside their parent's unit.
+- If no node has `@unit`, the player preserves legacy node-by-node navigation.
+- Images work inside units without extra syntax. Prefer the unit's primary illustration on its root; additional node images render as thumbnails and remain clickable.
 
 ## Node Text
 

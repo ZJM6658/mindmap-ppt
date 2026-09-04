@@ -1,9 +1,11 @@
 export const sourceMarkdown = `
 - Mindmap PPT
   把文稿讲成可播放导图
+  @unit
   @image generated/product-overview.png
     - 它能帮你什么
       让复杂内容顺着讲
+      @unit
       @image generated/use-cases.png
         - 演讲汇报
           一步步展开论点脉络
@@ -15,6 +17,7 @@ export const sourceMarkdown = `
           从文章变成演示大纲
     - 最重要操作
       顺着播放再按需调整
+      @unit
       @image generated/controls-navigation.png
         - 顺序推进
           上下键或滚轮前进后退
@@ -26,6 +29,7 @@ export const sourceMarkdown = `
             点击节点只移动视角
     - 让 Agent 制作
       从材料到可播放导图
+      @unit
       @image generated/agent-workflow.png
         - 准备输入
           材料目标风格说清楚
@@ -37,6 +41,7 @@ export const sourceMarkdown = `
           更新 source.js 和配图
     - 你会拿到什么
       一个静态网站项目包
+      @unit
       @image generated/project-deliverable.png
         - 项目资产
           内容和图片都在 project
