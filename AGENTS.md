@@ -156,3 +156,6 @@ Keep all navigation paths going through `setActiveStepIndex()` so buttons, keybo
 - Prefer editing with `apply_patch`.
 - Keep the app dependency-free unless there is a clear reason to add tooling.
 - Browser cache can retain old `src/main.js` because it is loaded as a module. If a normal refresh looks stale, use a hard refresh.
+- This fork is the source of truth for the locally installed `mindmap-ppt-builder` skill.
+- After changing anything under `skills/mindmap-ppt-builder/`, validate the skill, commit and push the repository, then replace `~/.codex/skills/mindmap-ppt-builder` with the repository version in the same task.
+- Do not retain backups of older installed skill versions unless the user explicitly asks for one.
